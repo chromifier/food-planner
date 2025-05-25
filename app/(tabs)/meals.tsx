@@ -1,20 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, SectionList, TouchableOpacity } from 'react-native';
-import callOpenAI from '../../hooks/callOpenAI';
+import { View, Text, Button, StyleSheet, SectionList, TouchableOpacity } from 'react-native';
+import callOpenAI from '@/hooks/callOpenAI';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIngredients } from '@/context/ingredientsProvider';
-import { FlatList, ScrollView } from 'react-native-gesture-handler';
+import { useRecipes } from '@/context/recipesProvider';
 
 const Meals = () => {
     const [input, setInput] = useState("");
     const [response, setResponse] = useState("");
-    const [ingredientsString, setIngredientsString] = useState("");
-    const [selectedRecipes, setSelectedRecipes] = useState<string[]>([]);
+    // const [ingredientsString, setIngredientsString] = useState("");
+    const [selectedRecipes, setSelectedRecipes] = useState<{ title: string; }[]>([]);
 
     const ingredientsContext = useIngredients();
     if (!ingredientsContext) {
         throw new Error('useIngredients must be used within an IngredientsProvider');
     }
+
+    const recipesContext = useRecipes();
+    if (!recipesContext) {
+        throw new Error('useRecipes must be used within a RecipesProvider');
+    }
+    const { recipes, setRecipes } = recipesContext;
+
     const { ingredients, setIngredients } = ingredientsContext;
     const responseData = '{"recipes":[{"name":"Grilled Chicken with Rice","ingredients":["chicken breast","rice","olive oil"],"instructions":"Marinate chicken breast with olive oil, salt, and pepper. Grill until cooked through. Cook rice separately. Serve chicken on a bed of rice.","timeToCook":"30 minutes"},{"name":"Chicken Stir Fry","ingredients":["chicken breast","rice","olive oil"],"instructions":"Slice chicken breast and stir fry in olive oil until cooked. Add vegetables if available and cook until tender. Serve over cooked rice.","timeToCook":"25 minutes"},{"name":"Chicken and Rice Bowl","ingredients":["chicken breast","rice","olive oil"],"instructions":"Cook rice and pan-fry chicken until golden. Assemble in a bowl with rice and sliced chicken on top. Drizzle with olive oil.","timeToCook":"20 minutes"}]}';
 
@@ -30,10 +37,22 @@ const Meals = () => {
             }
         };
 
+        const loadRecipes = async () => {
+            try {
+                const storedRecipes = await AsyncStorage.getItem('storedRecipes');
+                if (storedRecipes) {
+                    setRecipes(JSON.parse(storedRecipes));
+                }
+            } catch (error) {
+                console.log('Error loading recipes in meals:', error);
+            }
+        };
+
         loadIngredients();
+        loadRecipes();
         console.log('Stored ingredients loaded:', ingredients); // Log the ingredients to check if they are loaded correctly
-        setIngredientsString(JSON.stringify(ingredients)); // Ensure ingredients are in the correct format for OpenAI
-        // getRecipes();
+        console.log('Stored recipes loaded:', recipes); // Log the ingredients to check if they are loaded correctly
+        // setIngredientsString(JSON.stringify(ingredients)); // Ensure ingredients are in the correct format for OpenAI
         setResponse(JSON.parse(responseData));
     }, []);
 
@@ -88,19 +107,54 @@ const Meals = () => {
             <View style={{ marginTop: 20 }}>
                 <Button color={'#5cb85c'} title="Get New Recipes" onPress={getRecipes} />
             </View>
+            <View style={{ marginTop: 20 }}>
+                <Button color={'#5cb85c'} title="Save Selected Recipes" onPress={saveSelectedRecipes} />
+            </View>
         </View>
     );
 
+    const addRecipe = async (recipe: any) => {
+        const updatedRecipes = [...selectedRecipes, recipe];
+        setIngredients(updatedRecipes);
+        setSelectedRecipes((prev) => [...prev, recipe]); // Add the selected recipe to the selected recipes state
+
+        try {
+            await AsyncStorage.setItem('storedRecipes', JSON.stringify(updatedRecipes));
+            console.log('Recipe added to AsyncStorage:', updatedRecipes);
+        } catch (error) {
+            console.error('Error adding recipe to AsyncStorage:', error);
+        }
+    };
+
+    const saveSelectedRecipes = async () => {
+        console.log("Saving selected recipes:", selectedRecipes);
+        try {
+            await AsyncStorage.setItem('storedRecipes', JSON.stringify(selectedRecipes));
+            console.log('Selected recipes saved to AsyncStorage:', selectedRecipes);
+        } catch (error) {
+            console.error('Error saving selected recipes:', error);
+        }
+    };
+
     const selectedRecipe = (recipe: any) => {
+        console.log("Selected recipe:", recipe);
         setSelectedRecipes((prev) => {
-            if (prev.includes(recipe.title)) {
-                // If the section is already selected, remove it
-                return prev.filter((title) => title !== recipe.title);
+            // Check if the recipe is already selected by comparing the title
+            const isSelected = prev.some((selected) => selected.title === recipe.title);
+
+            if (isSelected) {
+                // If the recipe is already selected, remove it
+                return prev.filter((selected) => selected.title !== recipe.title);
             } else {
-                // Otherwise, add it to the selected sections
-                return [...prev, recipe.title];
+                // Otherwise, add it to the selected recipes
+                return [...prev, recipe];
             }
         });
+
+        // Log whether the recipe was selected or deselected
+        const isSelected = selectedRecipes.some((selected) => selected.title === recipe.title);
+        console.log(isSelected ? "Recipe deselected" : "Recipe selected");
+        console.log("Updated selected recipes:", selectedRecipes);
 
     };
 
@@ -120,7 +174,7 @@ const Meals = () => {
                         <TouchableOpacity onPress={() => selectedRecipe(section)}>
                             <View style={[
                                 styles.sectionContainer,
-                                selectedRecipes.includes(section.title) && styles.selectedRecipeContainer, // Apply selected style
+                                selectedRecipes.some((selected) => selected.title === section.title) && styles.selectedRecipeContainer, // Apply selected style
                             ]}>
                                 {/* Section Header */}
                                 <View style={styles.sectionHeaderContainer}>
